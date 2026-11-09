@@ -1,0 +1,26 @@
+{
+  "name": "gestion-trabajo-papa",
+  "version": "1.0.0",
+  "description": "Sistema de gestión y programación de turnos de vigilancia (día, noche, relevos), descansos compensatorios y control de vacaciones.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test tests/*.test.js",
+    "seed": "node src/shared/seed.js",
+    "backup": "node src/shared/cli-backup.js"
+  },
+  "keywords": [
+    "vigilancia",
+    "turnos",
+    "guarda-seguridad",
+    "vacaciones",
+    "compensatorios",
+    "pwa"
+  ],
+  "author": "Gestion Trabajo Papa",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

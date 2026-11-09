@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Escudo de Vigilancia y Turnos">
+  <rect width="128" height="128" rx="24" fill="#1e3a8a"/>
+  <path d="M64 16L24 32v30c0 27.6 17.1 52.8 40 60 22.9-7.2 40-32.4 40-60V32L64 16z" fill="#f59e0b"/>
+  <path d="M64 24L32 37v25c0 22.5 13.7 43.3 32 49.5 18.3-6.2 32-27 32-49.5V37L64 24z" fill="#0f172a"/>
+  <circle cx="64" cy="64" r="20" fill="none" stroke="#f8fafc" stroke-width="5"/>
+  <path d="M64 52v13l9 6" fill="none" stroke="#f59e0b" stroke-width="5" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Sistema de gestión y programación de turnos de vigilancia (día, noche, relevos), descansos compensatorios y control de vacaciones.">
+  <meta name="theme-color" content="#1e3a8a">
+  <title>Gestión Trabajo Papá · Turnos y Vacaciones de Vigilancia</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <a href="#main-content" class="skip-link">Saltar al contenido principal</a>
+
+  <header class="app-header" role="banner">
+    <div class="header-inner">
+      <div class="brand-group">
+        <img src="/icon.svg" alt="" class="brand-icon" width="44" height="44">
+        <div>
+          <h1 class="brand-title">Gestión Trabajo Papá</h1>
+          <p class="brand-subtitle">Control de Turnos de Vigilancia, Compensatorios y Vacaciones</p>
+        </div>
+      </div>
+
+      <div class="header-status-group">
+        <div id="connection-status" class="conn-badge" role="status" aria-live="polite">
+          En línea · Sincronizado
+        </div>
+        <button type="button" id="btn-sync-now" class="btn btn-amber btn-sm hidden">
+          Sincronizar cambios pendientes (<span id="pending-ops-count">0</span>)
+        </button>
+        <div id="user-session-bar" class="hidden">
+          <span id="current-user-label" style="font-weight:700; margin-right:8px;"></span>
+          <button type="button" id="btn-logout" class="btn btn-secondary btn-sm">
+            Cerrar sesión
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <nav class="main-nav" id="main-nav" aria-label="Navegación principal">
+    <ul class="nav-list">
+      <li>
+        <button type="button" class="nav-btn" data-tab="view-turnos" aria-current="page">
+          1. Turnos y Compensatorios
+        </button>
+      </li>
+      <li>
+        <button type="button" class="nav-btn" data-tab="view-vacaciones">
+          2. Historial y Saldo de Vacaciones
+        </button>
+      </li>
+      <li>
+        <button type="button" class="nav-btn" data-tab="view-respaldo">
+          3. Respaldo y Perfil Laboral
+        </button>
+      </li>
+      <li>
+        <button type="button" class="nav-btn" data-tab="view-soporte">
+          4. Soporte y Novedades
+        </button>
+      </li>
+    </ul>
+  </nav>
+
+  <main id="main-content" class="app-container" tabindex="-1">
+    <!-- Región viva para anuncios globales de estado y errores -->
+    <div id="global-live-region" class="hidden" role="alert" aria-live="assertive"></div>
+
+    <!-- ======================================================= -->
+    <!-- PANTALLA DE ACCESO RÁPIDO (PIN DE GUARDA)               -->
+    <!-- ======================================================= -->
+    <section id="view-login" class="card hidden" aria-labelledby="login-heading">
+      <div class="card-header">
+        <h2 id="login-heading" class="card-title">Ingreso de Guarda de Seguridad</h2>
+      </div>
+      <p>
+        Ingrese con su usuario y PIN de 4 dígitos para consultar o registrar sus turnos y vacaciones.
+        Para uso inmediato en este dispositivo puede usar el botón de acceso rápido de <strong>Papá</strong>.
+      </p>
+
+      <form id="form-login" novalidate>
+        <div class="form-grid">
+          <div class="form-field">
+            <label for="login-username" class="form-label">
+              Usuario <span class="required-mark">*</span>
+            </label>
+            <input
+              type="text"
+              id="login-username"
+              name="username"
+              class="form-input"
+              autocomplete="username"
+              value="papa"
+              required
+            >
+            <span id="err-login-username" class="field-error" aria-live="polite"></span>
+          </div>
+
+          <div class="form-field">
+            <label for="login-pin" class="form-label">
+              PIN de acceso (4 dígitos) <span class="required-mark">*</span>
+            </label>
+            <input
+              type="password"
+              id="login-pin"
+              name="pin"
+              class="form-input"
+              inputmode="numeric"
+              autocomplete="current-password"
+              value="1234"
+              required
+            >
+            <p class="form-hint">PIN predeterminado de Papá: 1234</p>
+            <span id="err-login-pin" class="field-error" aria-live="polite"></span>
+          </div>
+        </div>
+
+        <div style="margin-top: 16px; display: flex; flex-wrap: wrap; gap: 12px;">
+          <button type="submit" class="btn btn-primary">
+            Entrar a mis turnos
+          </button>
+          <button type="button" id="btn-quick-login-papa" class="btn btn-amber">
+            Ingreso directo Papá (PIN 1234)
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <!-- ======================================================= -->
+    <!-- SECCIÓN 1: TURNOS, PATRONES Y COMPENSATORIOS            -->
+    <!-- ======================================================= -->
+    <section id="view-turnos" aria-labelledby="turnos-heading">
+      <div class="card">
+        <div class="card-header">
+          <h2 id="turnos-heading" class="card-title">Resumen de Turnos y Descansos Compensatorios</h2>
+          <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
+            <label for="filter-month" class="form-label" style="margin:0;">Mes a consultar:</label>
+            <input type="month" id="filter-month" class="form-input" style="min-height:42px; width:auto;" value="2026-11">
+            <button type="button" id="btn-open-pattern-modal" class="btn btn-amber">
+              Generar ciclo automático (2x2x2 / 6x1)
+            </button>
+          </div>
+        </div>
+
+        <div id="fatigue-alert-banner" class="alert-box alert-warning hidden" role="status" aria-live="polite">
+          <strong>Aviso de descanso:</strong> Se detectaron más de 6 días continuos laborados sin descanso reglamentario en este periodo. Verifique su programación.
+        </div>
+
+        <div class="kpi-grid" aria-label="Indicadores del mes y saldo acumulado">
+          <article class="kpi-card highlight-blue">
+            <span class="kpi-label">Días Trabajados (Mes)</span>
+            <strong class="kpi-value" id="kpi-dias-trabajados">0</strong>
+            <span class="kpi-detail" id="kpi-detalle-turnos">0 Diurnos · 0 Nocturnos · 0 Relevos</span>
+          </article>
+
+          <article class="kpi-card">
+            <span class="kpi-label">Descansos Reglamentarios</span>
+            <strong class="kpi-value" id="kpi-descansos-reg">0</strong>
+            <span class="kpi-detail" id="kpi-horas-totales">0 horas laboradas en el mes</span>
+          </article>
+
+          <article class="kpi-card highlight-amber">
+            <span class="kpi-label">Domingos / Festivos Laborados</span>
+            <strong class="kpi-value" id="kpi-festivos-laborados">0</strong>
+            <span class="kpi-detail" id="kpi-horas-festivas">0 horas en domingo o festivo</span>
+          </article>
+
+          <article class="kpi-card highlight-teal">
+            <span class="kpi-label">Saldo Compensatorios Pendientes</span>
+            <strong class="kpi-value" id="kpi-saldo-compensatorios">0</strong>
+            <span class="kpi-detail" id="kpi-detalle-compensatorios">0 generados vs 0 disfrutados</span>
+          </article>
+        </div>
+
+        <!-- Botonera rápida de un toque para el turno de hoy -->
+        <div style="margin-top: 12px;">
+          <h3 style="margin: 0 0 8px; font-size: 1.05rem;">
+             marcación rápida para la fecha seleccionada (<span id="quick-date-label">Hoy</span>):
+          </h3>
+          <div class="quick-shift-grid">
+            <button type="button" class="quick-shift-btn" data-quick-type="diurno">
+              <span>☀️ Turno Diurno (12h)</span>
+              <small>06:00 a 18:00</small>
+            </button>
+            <button type="button" class="quick-shift-btn" data-quick-type="nocturno">
+              <span>🌙 Turno Nocturno (12h)</span>
+              <small>18:00 a 06:00</small>
+            </button>
+            <button type="button" class="quick-shift-btn" data-quick-type="relevo">
+              <span>🔄 Turno de Relevo</span>
+              <small>06:00 a 18:00</small>
+            </button>
+            <button type="button" class="quick-shift-btn" data-quick-type="descanso_reglamentario">
+              <span>🏠 Descanso Reglamentario</span>
+              <small>Día libre del ciclo</small>
+            </button>
+            <button type="button" class="quick-shift-btn" data-quick-type="descanso_compensatorio">
+              <span>✅ Descanso Compensatorio</span>
+              <small>Descuenta 1 compensatorio</small>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Formulario detallado para registrar/editar un turno o minuta -->
+      <div class="card">
+        <div class="card-header">
+          <h3 id="shift-form-title" class="card-title">Registrar o Modificar Turno Diario</h3>
+        </div>
+
+        <form id="form-shift" novalidate>
+          <input type="hidden" id="shift-expected-version" value="">
+          <fieldset style="border:none; padding:0; margin:0;">
+            <legend class="form-hint" style="margin-bottom:12px;">
+              Los campos marcados con <span class="required-mark">*</span> son obligatorios. Al elegir la fecha se detecta automáticamente si es domingo o festivo en Colombia.
+            </legend>
+
+            <div class="form-grid">
+              <div class="form-field">
+                <label for="shift-date" class="form-label">
+                  Fecha del turno <span class="required-mark">*</span>
+                </label>
+                <input type="date" id="shift-date" name="shiftDate" class="form-input" required>
+                <span id="shift-date-holiday-hint" class="form-hint"></span>
+                <span id="err-shift-date" class="field-error" aria-live="polite"></span>
+              </div>
+
+              <div class="form-field">
+                <label for="shift-type" class="form-label">
+                  Tipo de jornada <span class="required-mark">*</span>
+                </label>
+                <select id="shift-type" name="shiftType" class="form-select" required>
+                  <option value="diurno">☀️ Turno Diurno (12h · 06:00 - 18:00)</option>
+                  <option value="nocturno">🌙 Turno Nocturno (12h · 18:00 - 06:00)</option>
+                  <option value="relevo">🔄 Turno de Relevo / Apoyo</option>
+                  <option value="descanso_reglamentario">🏠 Descanso Reglamentario</option>
+                  <option value="descanso_compensatorio">✅ Descanso Compensatorio Disfrutado</option>
+                  <option value="permiso_incapacidad">🏥 Permiso o Incapacidad</option>
+                  <option value="vacaciones">🏖️ Día de Vacaciones</option>
+                </select>
+                <span id="err-shift-type" class="field-error" aria-live="polite"></span>
+              </div>
+
+              <div class="form-field">
+                <label for="shift-start" class="form-label">Hora de entrada</label>
+                <input type="time" id="shift-start" name="startTime" class="form-input" value="06:00">
+              </div>
+
+              <div class="form-field">
+                <label for="shift-end" class="form-label">Hora de salida</label>
+                <input type="time" id="shift-end" name="endTime" class="form-input" value="18:00">
+              </div>
+
+              <div class="form-field">
+                <label for="shift-hours" class="form-label">Horas laboradas</label>
+                <input
+                  type="number"
+                  id="shift-hours"
+                  name="hoursWorked"
+                  class="form-input"
+                  min="0"
+                  max="24"
+                  step="0.5"
+                  value="12"
+                >
+                <span id="err-shift-hours" class="field-error" aria-live="polite"></span>
+              </div>
+
+              <div class="form-field">
+                <label for="shift-post" class="form-label">Puesto de guardia</label>
+                <select id="shift-post" name="postId" class="form-select">
+                  <option value="">-- Seleccionar puesto --</option>
+                </select>
+              </div>
+
+              <div class="form-field">
+                <label for="shift-relief" class="form-label">Compañero que recibe / entrega relevo</label>
+                <input
+                  type="text"
+                  id="shift-relief"
+                  name="reliefGuardName"
+                  class="form-input"
+                  maxlength="80"
+                  placeholder="Ej. Carlos Ramírez"
+                >
+              </div>
+
+              <div class="form-field">
+                <label for="shift-notes" class="form-label">Minuta básica / Observaciones del turno</label>
+                <input
+                  type="text"
+                  id="shift-notes"
+                  name="notes"
+                  class="form-input"
+                  maxlength="500"
+                  placeholder="Ej. Sin novedad en portería, entrega de llaves completa"
+                >
+                <span id="err-shift-notes" class="field-error" aria-live="polite"></span>
+              </div>
+            </div>
+
+            <div style="margin-top: 14px; display: flex; flex-wrap: wrap; gap: 18px; align-items: center;">
+              <label style="display:flex; align-items:center; gap:8px; font-weight:700; cursor:pointer;">
+                <input type="checkbox" id="shift-generates-comp" style="width:22px; height:22px;">
+                Este turno genera 1 día de descanso compensatorio (por festivo/dominical laborado)
+              </label>
+            </div>
+
+            <div style="margin-top: 16px; display: flex; flex-wrap: wrap; gap: 12px;">
+              <button type="submit" id="btn-save-shift" class="btn btn-primary">
+                Guardar turno del día
+              </button>
+              <button type="button" id="btn-reset-shift-form" class="btn btn-secondary">
+                Limpiar formulario
+              </button>
+            </div>
+          </fieldset>
+        </form>
+      </div>
+
+      <!-- Listado / Tabla adaptable de turnos del mes -->
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">Programación e Histórico de Turnos del Mes</h3>
+        </div>
+
+        <div id="shifts-empty-state" class="empty-state hidden">
+          <h3>No hay turnos registrados en este mes</h3>
+          <p>
+            Esta pantalla muestra tu programación día por día. Para empezar rápidamente, puedes generar tu ciclo automático (por ejemplo 2 días, 2 noches y 2 descansos) o guardar el turno de hoy en el formulario superior.
+          </p>
+          <button type="button" id="btn-empty-generate-pattern" class="btn btn-amber">
+            Generar programación 2x2x2 para este mes
+          </button>
+        </div>
+
+        <div class="responsive-table-wrapper" id="shifts-table-container">
+          <table class="data-table" aria-label="Turnos programados en el mes">
+            <thead>
+              <tr>
+                <th scope="col">Fecha</th>
+                <th scope="col">Jornada</th>
+                <th scope="col">Horario y Horas</th>
+                <th scope="col">Puesto y Relevo</th>
+                <th scope="col">Compensatorio / Minuta</th>
+                <th scope="col">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="shifts-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================= -->
+    <!-- SECCIÓN 2: VACACIONES (HISTÓRICO, CAUSADOS Y SALDO)     -->
+    <!-- ======================================================= -->
+    <section id="view-vacaciones" class="hidden" aria-labelledby="vacaciones-heading">
+      <div class="card">
+        <div class="card-header">
+          <h2 id="vacaciones-heading" class="card-title">Control de Vacaciones Causadas, Disfrutadas y Pendientes</h2>
+        </div>
+
+        <div id="vacation-accumulation-alert" class="alert-box alert-warning hidden" role="status">
+          <strong>Recordatorio importante:</strong> Tienes 2 o más periodos anuales acumulados pendientes de disfrutar. Te sugerimos programar tus próximas vacaciones con la empresa.
+        </div>
+
+        <div class="kpi-grid" aria-label="Indicadores de vacaciones">
+          <article class="kpi-card">
+            <span class="kpi-label">Fecha de Ingreso a la Empresa</span>
+            <strong class="kpi-value" id="vac-kpi-ingreso" style="font-size:1.5rem;">--</strong>
+            <span class="kpi-detail" id="vac-kpi-anios">0 periodos anuales cumplidos</span>
+          </article>
+
+          <article class="kpi-card highlight-blue">
+            <span class="kpi-label">Días Causados (Periodos Cumplidos)</span>
+            <strong class="kpi-value" id="vac-kpi-causados">0</strong>
+            <span class="kpi-detail" id="vac-kpi-proporcional">+0 días proporcionales del año en curso</span>
+          </article>
+
+          <article class="kpi-card">
+            <span class="kpi-label">Días Ya Disfrutados</span>
+            <strong class="kpi-value" id="vac-kpi-disfrutados">0</strong>
+            <span class="kpi-detail" id="vac-kpi-programados">0 días programados próximamente</span>
+          </article>
+
+          <article class="kpi-card highlight-teal">
+            <span class="kpi-label">Saldo Pendiente por Disfrutar</span>
+            <strong class="kpi-value" id="vac-kpi-pendientes">0</strong>
+            <span class="kpi-detail" id="vac-kpi-disponible-total">0 días incluyendo proporcional actual</span>
+          </article>
+        </div>
+
+        <h3 style="margin: 18px 0 10px; font-size: 1.05rem;">
+          Estado por cada periodo anual causado desde el ingreso:
+        </h3>
+        <div class="responsive-table-wrapper">
+          <table class="data-table" aria-label="Periodos anuales causados desde la fecha de ingreso">
+            <thead>
+              <tr>
+                <th scope="col">Periodo Anual</th>
+                <th scope="col">Fechas del Periodo</th>
+                <th scope="col">Días Causados</th>
+                <th scope="col">Días Disfrutados</th>
+                <th scope="col">Días Pendientes</th>
+                <th scope="col">Estado</th>
+              </tr>
+            </thead>
+            <tbody id="vacation-periods-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Formulario para registrar vacaciones anteriores o próximas -->
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">Registrar Vacaciones Disfrutadas o Programar Próximas</h3>
+        </div>
+
+        <form id="form-vacation" novalidate>
+          <div class="form-grid">
+            <div class="form-field">
+              <label for="vac-period" class="form-label">
+                Periodo que se descuenta <span class="required-mark">*</span>
+              </label>
+              <input
+                type="text"
+                id="vac-period"
+                name="periodLabel"
+                class="form-input"
+                placeholder="Ej. 2024-2025"
+                value="2024-2025"
+                required
+              >
+              <span id="err-vac-period" class="field-error" aria-live="polite"></span>
+            </div>
+
+            <div class="form-field">
+              <label for="vac-start" class="form-label">
+                Fecha de inicio de vacaciones <span class="required-mark">*</span>
+              </label>
+              <input type="date" id="vac-start" name="startDate" class="form-input" required>
+              <span id="err-vac-start" class="field-error" aria-live="polite"></span>
+            </div>
+
+            <div class="form-field">
+              <label for="vac-end" class="form-label">
+                Fecha de último día de vacaciones <span class="required-mark">*</span>
+              </label>
+              <input type="date" id="vac-end" name="endDate" class="form-input" required>
+              <span id="err-vac-end" class="field-error" aria-live="polite"></span>
+            </div>
+
+            <div class="form-field">
+              <label for="vac-days" class="form-label">
+                Días hábiles tomados (se calcula solo o ajústelo)
+              </label>
+              <input
+                type="number"
+                id="vac-days"
+                name="businessDays"
+                class="form-input"
+                min="1"
+                max="90"
+                placeholder="Automático sin domingos ni festivos"
+              >
+              <p class="form-hint" id="vac-calc-hint">Seleccione las fechas para calcular los días hábiles.</p>
+              <span id="err-vac-days" class="field-error" aria-live="polite"></span>
+            </div>
+
+            <div class="form-field">
+              <label for="vac-status" class="form-label">Estado del periodo</label>
+              <select id="vac-status" name="status" class="form-select">
+                <option value="disfrutada">✅ Ya disfrutada (descuenta del saldo)</option>
+                <option value="programada">📅 Programada / Aprobada a futuro</option>
+                <option value="pendiente_aprobacion">⏳ Solicitud pendiente de aprobación</option>
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="vac-notes" class="form-label">Observaciones / Acta o Novedad</label>
+              <input
+                type="text"
+                id="vac-notes"
+                name="notes"
+                class="form-input"
+                maxlength="500"
+                placeholder="Ej. Autorizado por talento humano, turno cubierto por relevo"
+              >
+            </div>
+          </div>
+
+          <div style="margin-top: 12px;">
+            <label style="display:flex; align-items:center; gap:8px; font-weight:700; cursor:pointer;">
+              <input type="checkbox" id="vac-mark-calendar" style="width:22px; height:22px;">
+              Marcar automáticamente estos días como "Vacaciones" en mi calendario de turnos
+            </label>
+          </div>
+
+          <div style="margin-top: 16px;">
+            <button type="submit" class="btn btn-primary">
+              Registrar periodo de vacaciones
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Historial de vacaciones registradas -->
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">Historial de Vacaciones Registradas</h3>
+        </div>
+
+        <div id="vacations-empty-state" class="empty-state hidden">
+          <h3>Aún no has registrado vacaciones</h3>
+          <p>
+            Registra aquí las fechas de vacaciones que ya has tomado en años anteriores o las que tengas programadas para calcular tu saldo exacto pendiente.
+          </p>
+          <button type="button" id="btn-focus-vacation-form" class="btn btn-primary">
+            Agregar primer registro de vacaciones
+          </button>
+        </div>
+
+        <div class="responsive-table-wrapper" id="vacations-table-container">
+          <table class="data-table" aria-label="Historial de vacaciones">
+            <thead>
+              <tr>
+                <th scope="col">Periodo</th>
+                <th scope="col">Desde</th>
+                <th scope="col">Hasta</th>
+                <th scope="col">Días Hábiles</th>
+                <th scope="col">Estado</th>
+                <th scope="col">Observaciones</th>
+                <th scope="col">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="vacations-history-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================= -->
+    <!-- SECCIÓN 3: RESPALDO CIFRADO, PUESTOS Y PERFIL LABORAL   -->
+    <!-- ======================================================= -->
+    <section id="view-respaldo" class="hidden" aria-labelledby="respaldo-heading">
+      <div class="card">
+        <div class="card-header">
+          <h2 id="respaldo-heading" class="card-title">Datos Laborales y Preferencias de Notificación</h2>
+        </div>
+
+        <form id="form-profile" novalidate>
+          <div class="form-grid">
+            <div class="form-field">
+              <label for="prof-name" class="form-label">
+                Nombre del Guarda <span class="required-mark">*</span>
+              </label>
+              <input type="text" id="prof-name" class="form-input" required>
+            </div>
+
+            <div class="form-field">
+              <label for="prof-hire-date" class="form-label">
+                Fecha de ingreso a la empresa <span class="required-mark">*</span>
+              </label>
+              <input type="date" id="prof-hire-date" class="form-input" required>
+              <p class="form-hint">Se usa para calcular tus periodos de vacaciones causados.</p>
+            </div>
+
+            <div class="form-field">
+              <label for="prof-vac-days" class="form-label">
+                Días hábiles de vacaciones por año <span class="required-mark">*</span>
+              </label>
+              <input type="number" id="prof-vac-days" class="form-input" min="1" max="60" value="15" required>
+              <p class="form-hint">En Colombia la ley otorga 15 días hábiles por cada año laborado.</p>
+            </div>
+
+            <div class="form-field">
+              <label for="prof-pattern" class="form-label">Patrón de turno habitual</label>
+              <select id="prof-pattern" class="form-select">
+                <option value="2x2x2">2x2x2 (2 Días · 2 Noches · 2 Descansos)</option>
+                <option value="4x2">4x2 (2 Diurnos · 2 Nocturnos · 2 Descansos)</option>
+                <option value="6x1">6x1 (6 Días · 1 Descanso)</option>
+                <option value="diurno_fijo">12h Diurno Fijo (6x1)</option>
+                <option value="nocturno_fijo">12h Nocturno Fijo (6x1)</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="margin-top: 14px; display:flex; flex-wrap:wrap; gap:14px; align-items:center;">
+            <label style="display:flex; align-items:center; gap:8px; font-weight:700; cursor:pointer;">
+              <input type="checkbox" id="prof-notifications" style="width:22px; height:22px;" checked>
+              Activar avisos de cambio de turno y alerta de acumulación de vacaciones
+            </label>
+            <button type="button" id="btn-request-browser-notif" class="btn btn-secondary btn-sm">
+              Activar avisos del navegador (con permiso contextual)
+            </button>
+          </div>
+
+          <div style="margin-top: 16px;">
+            <button type="submit" class="btn btn-primary">
+              Guardar configuración laboral
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Agregar nuevo puesto de vigilancia -->
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">Puestos de Guardia Habituales</h3>
+        </div>
+        <form id="form-new-post" novalidate style="margin-bottom:14px;">
+          <div class="form-grid">
+            <div class="form-field">
+              <label for="new-post-name" class="form-label">Nombre del puesto <span class="required-mark">*</span></label>
+              <input type="text" id="new-post-name" class="form-input" placeholder="Ej. Portería Norte" required>
+            </div>
+            <div class="form-field">
+              <label for="new-post-location" class="form-label">Ubicación o detalle</label>
+              <input type="text" id="new-post-location" class="form-input" placeholder="Ej. Acceso peatonal calle 45">
+            </div>
+          </div>
+          <div style="margin-top:12px;">
+            <button type="submit" class="btn btn-secondary">
+              Agregar puesto a la lista
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Copias de seguridad cifradas AES-256-GCM y restauración -->
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">Copia de Seguridad Cifrada y Recuperación</h3>
+        </div>
+        <p>
+          Tus turnos y vacaciones se guardan en la base de datos local SQLite. Además, puedes generar una copia de seguridad cifrada (AES-256-GCM) para guardarla fuera de este equipo y restaurarla cuando lo necesites.
+        </p>
+        <div style="display:flex; flex-wrap:wrap; gap:12px; margin-bottom:16px;">
+          <button type="button" id="btn-create-backup" class="btn btn-primary">
+            Generar y descargar copia de seguridad cifrada
+          </button>
+        </div>
+
+        <h4 style="margin: 12px 0 8px;">Copias guardadas listas para restaurar:</h4>
+        <div id="backups-empty-state" class="empty-state hidden">
+          <p>Aún no se han generado copias cifradas en la carpeta de respaldos.</p>
+          <button type="button" id="btn-empty-backup" class="btn btn-primary">
+            Crear primera copia de seguridad ahora
+          </button>
+        </div>
+        <ul id="backups-list" style="list-style:none; padding:0; margin:0; display:grid; gap:8px;"></ul>
+      </div>
+    </section>
+
+    <!-- ======================================================= -->
+    <!-- SECCIÓN 4: SOPORTE, INCIDENCIAS Y MANUAL RÁPIDO         -->
+    <!-- ======================================================= -->
+    <section id="view-soporte" class="hidden" aria-labelledby="soporte-heading">
+      <div class="card">
+        <div class="card-header">
+          <h2 id="soporte-heading" class="card-title">Mesa de Ayuda y Registro de Novedades / Reclamos de Nómina</h2>
+        </div>
+        <p>
+          Si encuentras una diferencia en el pago de un festivo, un compensatorio pendiente o tienes una sugerencia, regístrala aquí para hacerle seguimiento con estado y responsable asignado.
+        </p>
+
+        <form id="form-ticket" novalidate>
+          <div class="form-grid">
+            <div class="form-field">
+              <label for="ticket-category" class="form-label">Categoría <span class="required-mark">*</span></label>
+              <select id="ticket-category" class="form-select" required>
+                <option value="error_turno">📋 Diferencia en turno o festivo laborado</option>
+                <option value="duda_vacaciones">🏖️ Verificación de saldo de vacaciones</option>
+                <option value="sugerencia">💡 Sugerencia de mejora</option>
+                <option value="soporte_tecnico">🛠️ Soporte técnico de la aplicación</option>
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="ticket-subject" class="form-label">Asunto resumido <span class="required-mark">*</span></label>
+              <input
+                type="text"
+                id="ticket-subject"
+                class="form-input"
+                placeholder="Ej. Falta compensatorio del domingo 8 de noviembre"
+                required
+              >
+              <span id="err-ticket-subject" class="field-error" aria-live="polite"></span>
+            </div>
+          </div>
+
+          <div class="form-field" style="margin-top:12px;">
+            <label for="ticket-desc" class="form-label">Descripción detallada <span class="required-mark">*</span></label>
+            <textarea
+              id="ticket-desc"
+              class="form-textarea"
+              rows="3"
+              placeholder="Explica la fecha del turno, puesto y qué necesitas verificar..."
+              required
+            ></textarea>
+            <span id="err-ticket-desc" class="field-error" aria-live="polite"></span>
+          </div>
+
+          <div style="margin-top:12px;">
+            <label style="display:flex; align-items:center; gap:8px; font-weight:600; cursor:pointer;">
+              <input type="checkbox" id="ticket-consent" style="width:20px; height:20px;" checked>
+              Autorizo adjuntar el resumen técnico de mi calendario para facilitar la revisión
+            </label>
+          </div>
+
+          <div style="margin-top:16px;">
+            <button type="submit" class="btn btn-primary">
+              Enviar solicitud de revisión
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">Mis Solicitudes y Estado de Seguimiento</h3>
+        </div>
+        <div id="tickets-empty-state" class="empty-state hidden">
+          <p>No tienes solicitudes abiertas en este momento.</p>
+        </div>
+        <div class="responsive-table-wrapper">
+          <table class="data-table" aria-label="Solicitudes de soporte">
+            <thead>
+              <tr>
+                <th scope="col">Categoría</th>
+                <th scope="col">Asunto y Detalle</th>
+                <th scope="col">Responsable</th>
+                <th scope="col">Estado</th>
+                <th scope="col">Fecha</th>
+              </tr>
+            </thead>
+            <tbody id="tickets-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ========================================================= -->
+  <!-- MODAL (<dialog>) GENERADOR DE PATRONES DE SEGURIDAD       -->
+  <!-- ========================================================= -->
+  <dialog id="dialog-pattern" class="app-dialog" aria-labelledby="dialog-pattern-title">
+    <form id="form-pattern-generator" method="dialog" novalidate>
+      <h2 id="dialog-pattern-title" style="margin-top:0;">Generar Programación por Ciclo de Vigilancia</h2>
+      <p class="form-hint" style="margin-bottom:14px;">
+        Completa automáticamente varios días seguidos según tu rotación (ej. 2 días, 2 noches, 2 descansos) y detecta los domingos y festivos.
+      </p>
+
+      <div class="form-grid">
+        <div class="form-field">
+          <label for="pat-start-date" class="form-label">Fecha de inicio del ciclo <span class="required-mark">*</span></label>
+          <input type="date" id="pat-start-date" class="form-input" value="2026-11-01" required>
+        </div>
+
+        <div class="form-field">
+          <label for="pat-days" class="form-label">Cantidad de días a programar <span class="required-mark">*</span></label>
+          <input type="number" id="pat-days" class="form-input" min="1" max="90" value="18" required>
+        </div>
+
+        <div class="form-field">
+          <label for="pat-type" class="form-label">Patrón de rotación <span class="required-mark">*</span></label>
+          <select id="pat-type" class="form-select">
+            <option value="2x2x2">2x2x2 (2 Días · 2 Noches · 2 Descansos)</option>
+            <option value="4x2">4x2 (2 Diurnos · 2 Nocturnos · 2 Descansos)</option>
+            <option value="6x1">6x1 (6 Días 8h · 1 Descanso)</option>
+            <option value="diurno_fijo">12h Diurno Fijo (6 días · 1 descanso)</option>
+            <option value="nocturno_fijo">12h Nocturno Fijo (6 noches · 1 descanso)</option>
+          </select>
+        </div>
+
+        <div class="form-field">
+          <label for="pat-offset" class="form-label">Empezar en el día del ciclo:</label>
+          <select id="pat-offset" class="form-select">
+            <option value="0">Día 1 del ciclo (ej. Primer Diurno)</option>
+            <option value="1">Día 2 del ciclo (ej. Segundo Diurno)</option>
+            <option value="2">Día 3 del ciclo (ej. Primer Nocturno)</option>
+            <option value="3">Día 4 del ciclo (ej. Segundo Nocturno)</option>
+            <option value="4">Día 5 del ciclo (ej. Primer Descanso)</option>
+            <option value="5">Día 6 del ciclo (ej. Segundo Descanso)</option>
+          </select>
+        </div>
+
+        <div class="form-field">
+          <label for="pat-post" class="form-label">Puesto asignado</label>
+          <select id="pat-post" class="form-select">
+            <option value="">-- Seleccionar puesto --</option>
+          </select>
+        </div>
+
+        <div class="form-field">
+          <label for="pat-relief" class="form-label">Compañero de relevo</label>
+          <input type="text" id="pat-relief" class="form-input" placeholder="Ej. Carlos Ramírez">
+        </div>
+      </div>
+
+      <div style="margin-top:18px; display:flex; flex-wrap:wrap; gap:10px; justify-content:flex-end;">
+        <button type="button" id="btn-close-pattern-modal" class="btn btn-secondary">
+          Cancelar
+        </button>
+        <button type="submit" class="btn btn-amber">
+          Aplicar programación en el calendario
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- ========================================================= -->
+  <!-- MODAL (<dialog>) RESOLUCIÓN DE CONFLICTOS DE EDICIÓN      -->
+  <!-- ========================================================= -->
+  <dialog id="dialog-conflict" class="app-dialog" aria-labelledby="dialog-conflict-title">
+    <h2 id="dialog-conflict-title" style="margin-top:0; color:#991b1b;">
+      Conflicto de Edición Detectado
+    </h2>
+    <p id="conflict-description">
+      Este turno fue modificado previamente. Revisa ambas versiones y elige cuál deseas conservar para no perder cambios en silencio:
+    </p>
+    <div id="conflict-comparison" class="alert-box alert-warning" style="font-size:0.9rem;"></div>
+    <div style="display:flex; flex-wrap:wrap; gap:10px; justify-content:flex-end; margin-top:14px;">
+      <button type="button" id="btn-conflict-keep-server" class="btn btn-secondary">
+        Conservar versión actual guardada
+      </button>
+      <button type="button" id="btn-conflict-force-client" class="btn btn-primary">
+        Sobrescribir con mi cambio nuevo
+      </button>
+    </div>
+  </dialog>
+
+  <script src="/app.js"></script>
+</body>
+</html>
