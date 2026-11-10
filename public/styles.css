@@ -658,3 +658,144 @@ body {
     background: #0f172a;
   }
 }
+
+/* ========================================================= */
+/* CALENDARIO VISUAL INTERACTIVO Y PROYECCIÓN EN ADELANTE    */
+/* ========================================================= */
+.upcoming-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(135px, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.upcoming-card {
+  background-color: var(--bg-page);
+  border: 2px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+}
+
+.upcoming-card.is-today {
+  border-color: var(--primary);
+  background-color: #eff6ff;
+  box-shadow: 0 0 0 2px rgba(29, 78, 216, 0.2);
+}
+
+.calendar-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  margin-bottom: 6px;
+  text-align: center;
+  font-weight: 800;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+
+.cal-day-empty {
+  min-height: 82px;
+  background-color: #f1f5f9;
+  border-radius: var(--radius-md);
+  opacity: 0.5;
+}
+
+.cal-day {
+  min-height: 88px;
+  padding: 8px;
+  border-radius: var(--radius-md);
+  border: 2px solid var(--border-color);
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-start;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.15s ease, transform 0.1s ease;
+}
+
+.cal-day:hover {
+  border-color: var(--primary);
+}
+
+.cal-day.is-today {
+  border: 3px solid var(--primary);
+  background-color: #eff6ff;
+}
+
+.cal-day.is-future {
+  border-style: dashed;
+}
+
+.cal-day-top {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 4px;
+  font-weight: 800;
+  font-size: 0.95rem;
+}
+
+.cal-today-tag {
+  background-color: var(--primary);
+  color: #ffffff;
+  font-size: 0.7rem;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-weight: 800;
+}
+
+.cal-festivo-tag {
+  background-color: #fee2e2;
+  color: #991b1b;
+  font-size: 0.68rem;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-weight: 800;
+}
+
+.cal-shift-pill {
+  width: 100%;
+  padding: 4px 6px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cal-status-sub {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+@media (max-width: 640px) {
+  .calendar-weekdays {
+    font-size: 0.75rem;
+  }
+  .cal-day {
+    min-height: 74px;
+    padding: 4px;
+  }
+  .cal-shift-pill {
+    font-size: 0.68rem;
+    padding: 2px 4px;
+  }
+}

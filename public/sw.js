@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_VERSION = 'gestion-papa-v1.0.0';
+const CACHE_VERSION = 'gestion-papa-v1.3.0';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -54,19 +54,16 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Para activos estáticos de la interfaz: caché primero con actualización en segundo plano
+  // Para activos estáticos de la interfaz: intentar red primero para entregar cambios al instante y caer a caché si no hay red
   event.respondWith(
-    caches.match(request).then((cached) => {
-      const fetchPromise = fetch(request)
-        .then((networkResponse) => {
-          if (networkResponse.ok) {
-            const copy = networkResponse.clone();
-            caches.open(CACHE_VERSION).then((cache) => cache.put(request, copy));
-          }
-          return networkResponse;
-        })
-        .catch(() => cached);
-      return cached || fetchPromise;
-    })
+    fetch(request)
+      .then((networkResponse) => {
+        if (networkResponse.ok) {
+          const copy = networkResponse.clone();
+          caches.open(CACHE_VERSION).then((cache) => cache.put(request, copy));
+        }
+        return networkResponse;
+      })
+      .catch(() => caches.match(request))
   );
 });

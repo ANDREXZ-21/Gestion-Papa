@@ -6,7 +6,7 @@ const { hashPin, verifyPin, sanitizeText } = require('../../shared/security');
 const { parseISODate } = require('../../shared/holidays');
 
 const VALID_ROLES = new Set(['guarda', 'supervisor']);
-const VALID_PATTERNS = new Set(['2x2x2', '6x1', '4x2', 'diurno_fijo', 'nocturno_fijo']);
+const VALID_PATTERNS = new Set(['2x2x2', '4x1x4', '6x1', '4x2', 'diurno_fijo', 'nocturno_fijo']);
 
 function createAuthModule(db, { sessionTtlHours = 168 } = {}) {
   function toPublicUser(row) {

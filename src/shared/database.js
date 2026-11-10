@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS users (
   pin_hash TEXT NOT NULL,
   hire_date TEXT NOT NULL CHECK(hire_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
   vacation_days_per_year INTEGER NOT NULL DEFAULT 15 CHECK(vacation_days_per_year BETWEEN 1 AND 60),
-  preferred_pattern TEXT NOT NULL DEFAULT '2x2x2' CHECK(preferred_pattern IN ('2x2x2', '6x1', '4x2', 'diurno_fijo', 'nocturno_fijo')),
+  preferred_pattern TEXT NOT NULL DEFAULT '2x2x2' CHECK(preferred_pattern IN ('2x2x2', '4x1x4', '6x1', '4x2', 'diurno_fijo', 'nocturno_fijo')),
   notifications_enabled INTEGER NOT NULL DEFAULT 1 CHECK(notifications_enabled IN (0, 1)),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -134,18 +134,78 @@ function openDatabase(dbPath) {
   db.prepare(
     'INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (1, ?)'
   ).run(new Date().toISOString());
+
+  // Migración v2: Ampliar CHECK constraint de preferred_pattern en users para incluir '4x1x4'
+  const mig2 = db.prepare('SELECT version FROM schema_migrations WHERE version = 2').get();
+  if (!mig2) {
+    const tableSqlRow = db
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'")
+      .get();
+    if (tableSqlRow && tableSqlRow.sql && !tableSqlRow.sql.includes("'4x1x4'")) {
+      db.exec('PRAGMA foreign_keys = OFF;');
+      db.exec('BEGIN IMMEDIATE TRANSACTION;');
+      try {
+        db.exec(`
+          CREATE TABLE users_v2 (
+            id TEXT PRIMARY KEY,
+            username TEXT NOT NULL UNIQUE CHECK(length(trim(username)) >= 2),
+            full_name TEXT NOT NULL CHECK(length(trim(full_name)) >= 2),
+            role TEXT NOT NULL CHECK(role IN ('guarda', 'supervisor')),
+            pin_hash TEXT NOT NULL,
+            hire_date TEXT NOT NULL CHECK(hire_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+            vacation_days_per_year INTEGER NOT NULL DEFAULT 15 CHECK(vacation_days_per_year BETWEEN 1 AND 60),
+            preferred_pattern TEXT NOT NULL DEFAULT '2x2x2' CHECK(preferred_pattern IN ('2x2x2', '4x1x4', '6x1', '4x2', 'diurno_fijo', 'nocturno_fijo')),
+            notifications_enabled INTEGER NOT NULL DEFAULT 1 CHECK(notifications_enabled IN (0, 1)),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+          INSERT INTO users_v2 SELECT * FROM users;
+          DROP TABLE users;
+          ALTER TABLE users_v2 RENAME TO users;
+        `);
+        db.exec('COMMIT;');
+      } catch (err) {
+        db.exec('ROLLBACK;');
+        throw err;
+      } finally {
+        db.exec('PRAGMA foreign_keys = ON;');
+      }
+    }
+    db.prepare(
+      'INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (2, ?)'
+    ).run(new Date().toISOString());
+  }
+
   return db;
 }
 
 function withTransaction(db, fn) {
-  db.exec('BEGIN IMMEDIATE TRANSACTION;');
+  const depth = db._txDepth || 0;
+  const savepoint = `sp_${depth}`;
+  if (depth === 0) {
+    db.exec('BEGIN IMMEDIATE TRANSACTION;');
+  } else {
+    db.exec(`SAVEPOINT ${savepoint};`);
+  }
+  db._txDepth = depth + 1;
   try {
     const result = fn();
-    db.exec('COMMIT;');
+    db._txDepth = depth;
+    if (depth === 0) {
+      db.exec('COMMIT;');
+    } else {
+      db.exec(`RELEASE SAVEPOINT ${savepoint};`);
+    }
     return result;
   } catch (err) {
+    db._txDepth = depth;
     try {
-      db.exec('ROLLBACK;');
+      if (depth === 0) {
+        db.exec('ROLLBACK;');
+      } else {
+        db.exec(`ROLLBACK TO SAVEPOINT ${savepoint};`);
+        db.exec(`RELEASE SAVEPOINT ${savepoint};`);
+      }
     } catch {
       // Ignore rollback errors if transaction already closed
     }

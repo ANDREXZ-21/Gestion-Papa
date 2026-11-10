@@ -35,6 +35,21 @@ const PATRONES_SEGURIDAD = {
       { shiftType: 'descanso_reglamentario', startTime: '00:00', endTime: '00:00', hoursWorked: 0 },
     ],
   },
+  '4x1x4': {
+    nombre: '4 Días · 1 Descanso · 4 Noches',
+    secuencia: [
+      { shiftType: 'diurno', startTime: '06:00', endTime: '18:00', hoursWorked: 12 },
+      { shiftType: 'diurno', startTime: '06:00', endTime: '18:00', hoursWorked: 12 },
+      { shiftType: 'diurno', startTime: '06:00', endTime: '18:00', hoursWorked: 12 },
+      { shiftType: 'diurno', startTime: '06:00', endTime: '18:00', hoursWorked: 12 },
+      { shiftType: 'descanso_reglamentario', startTime: '00:00', endTime: '00:00', hoursWorked: 0 },
+      { shiftType: 'nocturno', startTime: '18:00', endTime: '06:00', hoursWorked: 12 },
+      { shiftType: 'nocturno', startTime: '18:00', endTime: '06:00', hoursWorked: 12 },
+      { shiftType: 'nocturno', startTime: '18:00', endTime: '06:00', hoursWorked: 12 },
+      { shiftType: 'nocturno', startTime: '18:00', endTime: '06:00', hoursWorked: 12 },
+      { shiftType: 'descanso_reglamentario', startTime: '00:00', endTime: '00:00', hoursWorked: 0 },
+    ],
+  },
   '4x2': {
     nombre: '4x2 (2 Diurnos · 2 Nocturnos · 2 Descansos)',
     secuencia: [
@@ -94,14 +109,16 @@ function generarTurnosPorPatron({
   postId = null,
   reliefGuardName = '',
   offsetDiaCiclo = 0,
+  fechaReferencia = null,
+  pasoEnFechaReferencia = null,
 }) {
   const dtInicio = parseISODate(fechaInicio);
   if (!dtInicio) {
     throw new AppError('SHIFT_INVALID_START_DATE', 'Fecha de inicio inválida (use YYYY-MM-DD).', 400);
   }
   const numDias = Number.parseInt(dias, 10);
-  if (!Number.isInteger(numDias) || numDias < 1 || numDias > 90) {
-    throw new AppError('SHIFT_INVALID_DAYS_RANGE', 'La cantidad de días a programar debe estar entre 1 y 90.', 400);
+  if (!Number.isInteger(numDias) || numDias < 1 || numDias > 730) {
+    throw new AppError('SHIFT_INVALID_DAYS_RANGE', 'La cantidad de días a programar debe estar entre 1 y 730 días.', 400);
   }
   const configPatron = PATRONES_SEGURIDAD[patron];
   if (!configPatron) {
@@ -109,13 +126,26 @@ function generarTurnosPorPatron({
   }
 
   const secuencia = configPatron.secuencia;
+  const len = secuencia.length;
   const resultado = [];
-  const offset = Math.max(0, Number.parseInt(offsetDiaCiclo, 10) || 0);
+  let offset = Math.max(0, Number.parseInt(offsetDiaCiclo, 10) || 0);
+
+  // Si el usuario indica cómo va en una fecha de referencia (ej. Hoy),
+  // calculamos el desplazamiento exacto para que esa fecha caiga en ese paso del ciclo
+  // y proyecte tanto desde el inicio como los días en adelante.
+  if (fechaReferencia && pasoEnFechaReferencia !== null && pasoEnFechaReferencia !== undefined) {
+    const dtRef = parseISODate(fechaReferencia);
+    if (dtRef) {
+      const pasoRef = Math.max(0, Number.parseInt(pasoEnFechaReferencia, 10) || 0);
+      const diffDays = Math.round((dtRef.getTime() - dtInicio.getTime()) / (1000 * 60 * 60 * 24));
+      offset = (((pasoRef - diffDays) % len) + len) % len;
+    }
+  }
 
   for (let i = 0; i < numDias; i += 1) {
     const fechaActual = addDaysUTC(dtInicio, i);
     const fechaISO = formatDateISO(fechaActual);
-    const paso = secuencia[(i + offset) % secuencia.length];
+    const paso = secuencia[(i + offset) % len];
     const infoFecha = obtenerInfoFecha(fechaISO);
     const esLaborado = TIPOS_TRABAJADOS.has(paso.shiftType);
     const generaCompensatorio = esLaborado && infoFecha.esDominicalOFestivo;
@@ -553,6 +583,8 @@ function createTurnosModule(db) {
       postId = null,
       reliefGuardName = '',
       offsetDiaCiclo = 0,
+      referenceDate = null,
+      stepOnReferenceDate = null,
       overwriteExisting = true,
     },
     { actor = 'guarda' } = {}
@@ -568,6 +600,8 @@ function createTurnosModule(db) {
       postId: postId || null,
       reliefGuardName: cleanRelief,
       offsetDiaCiclo,
+      fechaReferencia: referenceDate,
+      pasoEnFechaReferencia: stepOnReferenceDate,
     });
 
     return withTransaction(db, () => {
@@ -594,11 +628,38 @@ function createTurnosModule(db) {
     return { deleted: true, shiftDate };
   }
 
-  function getShiftsSummary(userId, { fromDate, toDate } = {}) {
+  function getShiftsSummary(userId, { fromDate, toDate, cutoffDate } = {}) {
+    const todayISO =
+      cutoffDate && parseISODate(cutoffDate)
+        ? cutoffDate
+        : formatDateISO(new Date());
+    const yearStr = todayISO.slice(0, 4);
+    const janFirstISO = `${yearStr}-01-01`;
+    const decLastISO = `${yearStr}-12-31`;
+
     const periodShifts = listShifts({ userId, fromDate, toDate });
-    const allShifts = fromDate || toDate ? listShifts({ userId }) : periodShifts;
+    const allShifts = listShifts({ userId });
+    const ytdShifts = allShifts.filter(
+      (s) => s.shiftDate >= janFirstISO && s.shiftDate <= todayISO
+    );
+    const fullYearShifts = allShifts.filter(
+      (s) => s.shiftDate >= janFirstISO && s.shiftDate <= decLastISO
+    );
+    const upcomingShifts = allShifts
+      .filter((s) => s.shiftDate >= todayISO)
+      .slice(0, 14);
+
+    const dtJan1 = parseISODate(janFirstISO);
+    const dtCutoff = parseISODate(todayISO);
+    const diasTranscurridosAnio =
+      dtJan1 && dtCutoff && dtCutoff >= dtJan1
+        ? Math.floor((dtCutoff.getTime() - dtJan1.getTime()) / (1000 * 60 * 60 * 24)) + 1
+        : 0;
+
     const resumenPeriodo = calcularResumenTurnos(periodShifts);
     const resumenHistorico = calcularResumenTurnos(allShifts);
+    const resumenAnualHastaHoy = calcularResumenTurnos(ytdShifts);
+    const resumenAnualCompleto = calcularResumenTurnos(fullYearShifts);
 
     return {
       periodo: {
@@ -606,6 +667,19 @@ function createTurnosModule(db) {
         toDate: toDate || null,
         ...resumenPeriodo,
       },
+      anualHastaHoy: {
+        fromDate: janFirstISO,
+        toDate: todayISO,
+        diasTranscurridosAnio,
+        ...resumenAnualHastaHoy,
+      },
+      anualCompleto: {
+        fromDate: janFirstISO,
+        toDate: decLastISO,
+        totalDiasProgramadosAnio: fullYearShifts.length,
+        ...resumenAnualCompleto,
+      },
+      proximosTurnos: upcomingShifts,
       acumuladoGlobal: {
         compensatoriosGenerados: resumenHistorico.compensatoriosGenerados,
         compensatoriosDisfrutados: resumenHistorico.descansosCompensatoriosDisfrutados,

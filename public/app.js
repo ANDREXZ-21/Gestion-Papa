@@ -44,12 +44,60 @@
     festivosMap: new Map(),
     lastModalTrigger: null,
     pendingConflict: null,
+    customYearRange: null,
+    autoInitializedYear: false,
   };
+
+  const MONTH_NAMES_ES = [
+    'Enero',
+    'Febrero',
+    'Marzo',
+    'Abril',
+    'Mayo',
+    'Junio',
+    'Julio',
+    'Agosto',
+    'Septiembre',
+    'Octubre',
+    'Noviembre',
+    'Diciembre',
+  ];
+
+  const WEEKDAY_SHORT_ES = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+
+  const SHIFT_SHORT_LABELS = {
+    diurno: '☀️ Día (12h)',
+    nocturno: '🌙 Noche (12h)',
+    relevo: '🔄 Relevo',
+    descanso_reglamentario: '🏠 Descanso',
+    descanso_compensatorio: '✅ Compensatorio',
+    permiso_incapacidad: '🏥 Permiso',
+    vacaciones: '🏖️ Vacaciones',
+  };
+
+  function getLocalTodayISO() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  function getCutoffDateISO() {
+    const el = document.getElementById('cutoff-date');
+    if (el && /^\d{4}-\d{2}-\d{2}$/.test(el.value)) {
+      return el.value;
+    }
+    return getLocalTodayISO();
+  }
 
   // Registrar Service Worker para PWA Offline-First
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/sw.js').catch(() => {});
+      navigator.serviceWorker
+        .register('/sw.js')
+        .then((reg) => reg.update())
+        .catch(() => {});
     });
   }
 
@@ -157,7 +205,34 @@
       from: `${y}-${mm}-01`,
       to: `${y}-${mm}-${String(lastDay).padStart(2, '0')}`,
       year: y,
+      scope: 'month',
     };
+  }
+
+  function getActiveFilterBounds() {
+    const monthVal = document.getElementById('filter-month').value || '2026-11';
+    const scopeEl = document.getElementById('filter-scope');
+    const scope = scopeEl ? scopeEl.value : 'month';
+    const [y] = monthVal.split('-').map(Number);
+
+    if (scope === 'year_365') {
+      if (state.customYearRange) {
+        return {
+          from: state.customYearRange.from,
+          to: state.customYearRange.to,
+          year: y,
+          scope: 'year_365',
+        };
+      }
+      return {
+        from: `${y}-01-01`,
+        to: `${y}-12-31`,
+        year: y,
+        scope: 'year_365',
+      };
+    }
+
+    return getMonthBounds(monthVal);
   }
 
   // =========================================================
@@ -189,24 +264,252 @@
     }
   }
 
+  function renderUpcomingStrip() {
+    const strip = document.getElementById('upcoming-strip');
+    if (!strip) return;
+    strip.textContent = '';
+
+    const cutoffISO = getCutoffDateISO();
+    const upcoming =
+      (state.summary && state.summary.proximosTurnos) ||
+      state.shifts.filter((s) => s.shiftDate >= cutoffISO).slice(0, 10);
+
+    if (!upcoming || upcoming.length === 0) {
+      const msg = document.createElement('p');
+      msg.className = 'form-hint';
+      msg.textContent =
+        'Usa la calculadora de arriba ("¿Cómo vas en tus turnos hoy?") para proyectar tus próximos turnos.';
+      strip.appendChild(msg);
+      return;
+    }
+
+    for (const s of upcoming.slice(0, 10)) {
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = `upcoming-card${s.shiftDate === cutoffISO ? ' is-today' : ''}`;
+      card.style.cursor = 'pointer';
+      card.addEventListener('click', () => loadShiftIntoForm(s));
+
+      const [y, m, d] = s.shiftDate.split('-').map(Number);
+      const dt = new Date(Date.UTC(y, m - 1, d));
+      const dayName = WEEKDAY_SHORT_ES[dt.getUTCDay()];
+
+      const top = document.createElement('div');
+      top.style.display = 'flex';
+      top.style.justifyContent = 'space-between';
+      top.style.alignItems = 'center';
+      top.style.width = '100%';
+      top.style.fontWeight = '800';
+      top.style.fontSize = '0.85rem';
+      top.textContent = `${dayName} ${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}`;
+
+      if (s.shiftDate === cutoffISO) {
+        const tag = document.createElement('span');
+        tag.className = 'cal-today-tag';
+        tag.textContent = 'HOY';
+        top.appendChild(tag);
+      }
+
+      const badge = document.createElement('span');
+      badge.className = `cal-shift-pill badge-${s.shiftType}`;
+      badge.textContent = SHIFT_SHORT_LABELS[s.shiftType] || s.shiftType;
+
+      const sub = document.createElement('span');
+      sub.className = 'cal-status-sub';
+      sub.textContent =
+        s.hoursWorked > 0 ? `${s.startTime} - ${s.endTime}` : 'Día libre';
+
+      card.appendChild(top);
+      card.appendChild(badge);
+      card.appendChild(sub);
+      strip.appendChild(card);
+    }
+  }
+
+  function renderCalendarGrid() {
+    const grid = document.getElementById('calendar-grid');
+    const titleEl = document.getElementById('calendar-month-title');
+    if (!grid) return;
+    grid.textContent = '';
+
+    const monthVal = document.getElementById('filter-month').value || getLocalTodayISO().slice(0, 7);
+    const [year, month] = monthVal.split('-').map(Number);
+    const cutoffISO = getCutoffDateISO();
+
+    if (titleEl) {
+      titleEl.textContent = `${MONTH_NAMES_ES[month - 1] || monthVal} ${year}`;
+    }
+
+    const firstDayUTC = new Date(Date.UTC(year, month - 1, 1));
+    const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    // Convertir domingo (0) a 6, lunes (1) a 0 para cuadrícula Lunes -> Domingo
+    const startOffsetMonday = (firstDayUTC.getUTCDay() + 6) % 7;
+
+    const shiftsByDate = new Map();
+    for (const s of state.shifts || []) {
+      shiftsByDate.set(s.shiftDate, s);
+    }
+
+    for (let i = 0; i < startOffsetMonday; i += 1) {
+      const empty = document.createElement('div');
+      empty.className = 'cal-day-empty';
+      empty.setAttribute('aria-hidden', 'true');
+      grid.appendChild(empty);
+    }
+
+    const mm = String(month).padStart(2, '0');
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      const dd = String(day).padStart(2, '0');
+      const iso = `${year}-${mm}-${dd}`;
+      const shift = shiftsByDate.get(iso);
+      const isToday = iso === cutoffISO;
+      const isFuture = iso > cutoffISO;
+      const dt = new Date(Date.UTC(year, month - 1, day));
+      const isSunday = dt.getUTCDay() === 0;
+      const holidayName = state.festivosMap.get(iso);
+
+      const cell = document.createElement('button');
+      cell.type = 'button';
+      cell.className = `cal-day${isToday ? ' is-today' : ''}${isFuture ? ' is-future' : ''}`;
+      cell.setAttribute(
+        'aria-label',
+        `Día ${iso}: ${shift ? SHIFT_LABELS[shift.shiftType] || shift.shiftType : 'Sin turno'}`
+      );
+
+      cell.addEventListener('click', () => {
+        if (shift) {
+          loadShiftIntoForm(shift);
+        } else {
+          document.getElementById('shift-date').value = iso;
+          document.getElementById('quick-date-label').textContent = iso;
+          updateHolidayHintForSelectedDate();
+          document.getElementById('shift-type').focus();
+          announce(`Fecha ${iso} seleccionada para registrar turno.`, 'info');
+        }
+      });
+
+      const topRow = document.createElement('div');
+      topRow.className = 'cal-day-top';
+      const dayNum = document.createElement('span');
+      dayNum.textContent = String(day);
+      topRow.appendChild(dayNum);
+
+      if (isToday) {
+        const todayTag = document.createElement('span');
+        todayTag.className = 'cal-today-tag';
+        todayTag.textContent = 'HOY';
+        topRow.appendChild(todayTag);
+      } else if (holidayName || isSunday) {
+        const festTag = document.createElement('span');
+        festTag.className = 'cal-festivo-tag';
+        festTag.textContent = holidayName ? 'Festivo' : 'Dom';
+        topRow.appendChild(festTag);
+      }
+      cell.appendChild(topRow);
+
+      if (shift) {
+        const pill = document.createElement('div');
+        pill.className = `cal-shift-pill badge-${shift.shiftType}`;
+        pill.textContent = SHIFT_SHORT_LABELS[shift.shiftType] || shift.shiftType;
+        cell.appendChild(pill);
+
+        const statusSub = document.createElement('div');
+        statusSub.className = 'cal-status-sub';
+        statusSub.textContent = isFuture
+          ? '➜ Proyectado'
+          : isToday
+          ? '📍 Turno de hoy'
+          : '✔ Cumplido';
+        cell.appendChild(statusSub);
+      } else {
+        const emptySub = document.createElement('div');
+        emptySub.className = 'cal-status-sub';
+        emptySub.textContent = 'Sin programar';
+        cell.appendChild(emptySub);
+      }
+
+      grid.appendChild(cell);
+    }
+  }
+
   function renderShiftsAndSummary() {
     if (state.summary) {
-      const p = state.summary.periodo;
+      const scopeEl = document.getElementById('filter-scope');
+      const scope = scopeEl ? scopeEl.value : 'ytd_today';
+      const ytd = state.summary.anualHastaHoy || state.summary.periodo;
+      const anual = state.summary.anualCompleto || state.summary.periodo;
+      const mes = state.summary.periodo;
       const g = state.summary.acumuladoGlobal;
 
-      document.getElementById('kpi-dias-trabajados').textContent = String(p.totalDiasTrabajados);
-      document.getElementById('kpi-detalle-turnos').textContent =
-        `${p.diasDiurnos} Diurnos · ${p.diasNocturnos} Nocturnos · ${p.diasRelevo} Relevos`;
+      const activeStats =
+        scope === 'ytd_today' ? ytd : scope === 'year_365' ? anual : mes;
 
-      document.getElementById('kpi-descansos-reg').textContent = String(p.descansosReglamentarios);
+      const totalDiasContabilizados =
+        activeStats.totalDiasTrabajados +
+        activeStats.descansosReglamentarios +
+        activeStats.descansosCompensatoriosDisfrutados +
+        activeStats.permisosIncapacidades +
+        activeStats.diasVacaciones;
+
+      const subtitleEl = document.getElementById('ytd-range-subtitle');
+      const labelDiasEl = document.getElementById('kpi-label-dias');
+      const labelDescEl = document.getElementById('kpi-label-descansos');
+      const labelFestEl = document.getElementById('kpi-label-festivos');
+      const proyEl = document.getElementById('kpi-proyeccion-anual');
+
+      if (scope === 'ytd_today') {
+        if (subtitleEl) {
+          subtitleEl.textContent =
+            `Contabilizando desde el 1 de Enero (${ytd.fromDate}) hasta Hoy (${ytd.toDate}) · ` +
+            `${ytd.diasTranscurridosAnio || totalDiasContabilizados} días transcurridos del año.`;
+        }
+        if (labelDiasEl) labelDiasEl.textContent = `Días Trabajados (1 Ene → ${ytd.toDate})`;
+        if (labelDescEl) labelDescEl.textContent = `Descansos Reglamentarios (1 Ene → Hoy)`;
+        if (labelFestEl) labelFestEl.textContent = `Domingos / Festivos (1 Ene → Hoy)`;
+        if (proyEl) {
+          proyEl.textContent =
+            `Proyección 365 días del año: ${anual.totalDiasTrabajados} trabajados (${anual.diasDiurnos} Día · ${anual.diasNocturnos} Noche) y ${anual.descansosReglamentarios} descansos`;
+        }
+      } else if (scope === 'year_365') {
+        if (subtitleEl) {
+          subtitleEl.textContent =
+            `Mostrando proyección completa de los 365 días del año (${anual.fromDate} al ${anual.toDate}).`;
+        }
+        if (labelDiasEl) labelDiasEl.textContent = `Días Trabajados (Año 365 días)`;
+        if (labelDescEl) labelDescEl.textContent = `Descansos Reglamentarios (Año 365 días)`;
+        if (labelFestEl) labelFestEl.textContent = `Domingos / Festivos (Año 365 días)`;
+        if (proyEl) {
+          proyEl.textContent = `Hasta hoy (${ytd.toDate}): llevas ${ytd.totalDiasTrabajados} días trabajados`;
+        }
+      } else {
+        if (subtitleEl) {
+          subtitleEl.textContent = `Mostrando únicamente el mes seleccionado en el calendario.`;
+        }
+        if (labelDiasEl) labelDiasEl.textContent = 'Días Trabajados (Mes seleccionado)';
+        if (labelDescEl) labelDescEl.textContent = 'Descansos Reglamentarios (Mes)';
+        if (labelFestEl) labelFestEl.textContent = 'Domingos / Festivos (Mes)';
+        if (proyEl) {
+          proyEl.textContent = `Acumulado 1 Ene → Hoy: ${ytd.totalDiasTrabajados} días trabajados`;
+        }
+      }
+
+      document.getElementById('kpi-dias-trabajados').textContent = String(
+        activeStats.totalDiasTrabajados
+      );
+      document.getElementById('kpi-detalle-turnos').textContent =
+        `${activeStats.diasDiurnos} Diurnos · ${activeStats.diasNocturnos} Nocturnos · ${activeStats.diasRelevo} Relevos`;
+
+      document.getElementById('kpi-descansos-reg').textContent = String(
+        activeStats.descansosReglamentarios
+      );
       document.getElementById('kpi-horas-totales').textContent =
-        `${p.totalHorasTrabajadas} horas laboradas en el mes`;
+        `${activeStats.totalHorasTrabajadas} horas laboradas (${totalDiasContabilizados} días contabilizados)`;
 
       document.getElementById('kpi-festivos-laborados').textContent = String(
-        p.festivosODominicalesLaborados
+        activeStats.festivosODominicalesLaborados
       );
       document.getElementById('kpi-horas-festivas').textContent =
-        `${p.horasFestivas} horas en domingo o festivo`;
+        `${activeStats.horasFestivas} horas en domingo o festivo`;
 
       document.getElementById('kpi-saldo-compensatorios').textContent = String(
         g.saldoCompensatoriosPendientes
@@ -215,12 +518,15 @@
         `${g.compensatoriosGenerados} generados vs ${g.compensatoriosDisfrutados} disfrutados`;
 
       const fatigueBanner = document.getElementById('fatigue-alert-banner');
-      if (p.alertaFatiga) {
+      if (activeStats.alertaFatiga) {
         fatigueBanner.classList.remove('hidden');
       } else {
         fatigueBanner.classList.add('hidden');
       }
     }
+
+    renderUpcomingStrip();
+    renderCalendarGrid();
 
     const tbody = document.getElementById('shifts-tbody');
     const emptyState = document.getElementById('shifts-empty-state');
@@ -597,8 +903,9 @@
   // CARGA DE DATOS DESDE SERVIDOR O CACHÉ LOCAL
   // =========================================================
   async function loadAllData() {
-    const monthVal = document.getElementById('filter-month').value || '2026-11';
+    const monthVal = document.getElementById('filter-month').value || getLocalTodayISO().slice(0, 7);
     const { from, to, year } = getMonthBounds(monthVal);
+    const cutoffDate = getCutoffDateISO();
 
     try {
       const [meRes, postsRes, festivosRes, shiftsRes, vacRes, backupsRes, ticketsRes] =
@@ -606,7 +913,7 @@
           apiFetch('/api/auth/me'),
           apiFetch('/api/puestos'),
           apiFetch(`/api/festivos?year=${year}`),
-          apiFetch(`/api/turnos?from=${from}&to=${to}`),
+          apiFetch(`/api/turnos?from=${from}&to=${to}&cutoff=${cutoffDate}`),
           apiFetch('/api/vacaciones'),
           apiFetch('/api/backups'),
           apiFetch('/api/soporte/tickets'),
@@ -623,6 +930,31 @@
       state.festivosMap.clear();
       for (const f of festivosRes.festivos || []) {
         state.festivosMap.set(f.date, f.name);
+      }
+
+      // Si la base de datos aún no tiene los 365 días del año generados,
+      // inicializar automáticamente el año completo desde el 1 de enero
+      if (
+        !state.autoInitializedYear &&
+        state.summary &&
+        state.summary.anualCompleto &&
+        state.summary.anualCompleto.totalDiasProgramadosAnio < 300
+      ) {
+        state.autoInitializedYear = true;
+        await apiFetch('/api/turnos/patron', {
+          method: 'POST',
+          body: JSON.stringify({
+            startDate: `${year}-01-01`,
+            days: 365,
+            pattern: '4x1x4',
+            referenceDate: cutoffDate,
+            stepOnReferenceDate: 0,
+            postId: state.posts[0] ? state.posts[0].id : null,
+            overwriteExisting: true,
+            cutoffDate,
+          }),
+        });
+        return loadAllData();
       }
 
       localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(state.user));
@@ -843,11 +1175,98 @@
   // =========================================================
   // MODALES CON GESTIÓN DE FOCO ACCESIBLE (<dialog>)
   // =========================================================
+  const PATTERN_STEPS_LABELS = {
+    '2x2x2': [
+      'Día 1 del ciclo (1° Diurno)',
+      'Día 2 del ciclo (2° Diurno)',
+      'Día 3 del ciclo (1° Nocturno)',
+      'Día 4 del ciclo (2° Nocturno)',
+      'Día 5 del ciclo (1° Descanso)',
+      'Día 6 del ciclo (2° Descanso)',
+    ],
+    '4x1x4': [
+      'Día 1 del ciclo (1° Día)',
+      'Día 2 del ciclo (2° Día)',
+      'Día 3 del ciclo (3° Día)',
+      'Día 4 del ciclo (4° Día)',
+      'Día 5 del ciclo (Descanso tras 4 días)',
+      'Día 6 del ciclo (1° Noche)',
+      'Día 7 del ciclo (2° Noche)',
+      'Día 8 del ciclo (3° Noche)',
+      'Día 9 del ciclo (4° Noche)',
+      'Día 10 del ciclo (Descanso tras 4 noches)',
+    ],
+    '4x2': [
+      'Día 1 del ciclo (1° Diurno)',
+      'Día 2 del ciclo (2° Diurno)',
+      'Día 3 del ciclo (1° Nocturno)',
+      'Día 4 del ciclo (2° Nocturno)',
+      'Día 5 del ciclo (1° Descanso)',
+      'Día 6 del ciclo (2° Descanso)',
+    ],
+    '6x1': [
+      'Día 1 del ciclo (1° Día 8h)',
+      'Día 2 del ciclo (2° Día 8h)',
+      'Día 3 del ciclo (3° Día 8h)',
+      'Día 4 del ciclo (4° Día 8h)',
+      'Día 5 del ciclo (5° Día 8h)',
+      'Día 6 del ciclo (6° Día 8h)',
+      'Día 7 del ciclo (Descanso)',
+    ],
+    diurno_fijo: [
+      'Día 1 del ciclo (1° Diurno 12h)',
+      'Día 2 del ciclo (2° Diurno 12h)',
+      'Día 3 del ciclo (3° Diurno 12h)',
+      'Día 4 del ciclo (4° Diurno 12h)',
+      'Día 5 del ciclo (5° Diurno 12h)',
+      'Día 6 del ciclo (6° Diurno 12h)',
+      'Día 7 del ciclo (Descanso)',
+    ],
+    nocturno_fijo: [
+      'Día 1 del ciclo (1° Nocturno 12h)',
+      'Día 2 del ciclo (2° Nocturno 12h)',
+      'Día 3 del ciclo (3° Nocturno 12h)',
+      'Día 4 del ciclo (4° Nocturno 12h)',
+      'Día 5 del ciclo (5° Nocturno 12h)',
+      'Día 6 del ciclo (6° Nocturno 12h)',
+      'Día 7 del ciclo (Descanso)',
+    ],
+  };
+
+  function updatePatternOffsetOptions() {
+    const patType = document.getElementById('pat-type').value;
+    const offsetSelect = document.getElementById('pat-offset');
+    if (!offsetSelect) return;
+    const steps = PATTERN_STEPS_LABELS[patType] || PATTERN_STEPS_LABELS['2x2x2'];
+    offsetSelect.textContent = '';
+    steps.forEach((label, idx) => {
+      const opt = document.createElement('option');
+      opt.value = String(idx);
+      opt.textContent = label;
+      offsetSelect.appendChild(opt);
+    });
+  }
+
   function openPatternModal(triggerElement) {
     state.lastModalTrigger = triggerElement || document.activeElement;
     const dialog = document.getElementById('dialog-pattern');
+    const errBox = document.getElementById('pattern-modal-error');
+    if (errBox) {
+      errBox.textContent = '';
+      errBox.classList.add('hidden');
+    }
     const monthVal = document.getElementById('filter-month').value || '2026-11';
-    document.getElementById('pat-start-date').value = `${monthVal}-01`;
+    const yearVal = monthVal.split('-')[0] || '2026';
+    const currentDays = Number(document.getElementById('pat-days').value || 365);
+    if (currentDays >= 360) {
+      document.getElementById('pat-start-date').value = `${yearVal}-01-01`;
+    } else {
+      document.getElementById('pat-start-date').value = `${monthVal}-01`;
+    }
+    if (state.user && state.user.preferredPattern) {
+      document.getElementById('pat-type').value = state.user.preferredPattern;
+    }
+    updatePatternOffsetOptions();
     if (typeof dialog.showModal === 'function') {
       dialog.showModal();
     } else {
@@ -928,13 +1347,123 @@
     }
   }
 
+  function updateCalcStepOptions() {
+    const patEl = document.getElementById('calc-pattern');
+    const stepEl = document.getElementById('calc-step');
+    if (!patEl || !stepEl) return;
+    const steps = PATTERN_STEPS_LABELS[patEl.value] || PATTERN_STEPS_LABELS['4x1x4'];
+    stepEl.textContent = '';
+    steps.forEach((label, idx) => {
+      const opt = document.createElement('option');
+      opt.value = String(idx);
+      opt.textContent = label;
+      stepEl.appendChild(opt);
+    });
+  }
+
   // =========================================================
   // INICIALIZACIÓN Y EVENTOS DE INTERFAZ
   // =========================================================
   async function init() {
-    const todayISO = '2026-11-09';
+    const todayISO = getLocalTodayISO();
     document.getElementById('shift-date').value = todayISO;
     document.getElementById('quick-date-label').textContent = todayISO;
+    document.getElementById('filter-month').value = todayISO.slice(0, 7);
+
+    const cutoffInput = document.getElementById('cutoff-date');
+    if (cutoffInput) {
+      cutoffInput.value = todayISO;
+      cutoffInput.addEventListener('change', () => {
+        loadAllData();
+      });
+    }
+
+    const calcRefInput = document.getElementById('calc-ref-date');
+    if (calcRefInput) {
+      calcRefInput.value = todayISO;
+    }
+
+    updateCalcStepOptions();
+    const calcPatternEl = document.getElementById('calc-pattern');
+    if (calcPatternEl) {
+      calcPatternEl.addEventListener('change', () => {
+        updateCalcStepOptions();
+      });
+    }
+
+    // Actualizar automáticamente la fecha de corte cuando cambia el día del calendario
+    setInterval(() => {
+      const currentRealToday = getLocalTodayISO();
+      if (cutoffInput && cutoffInput.dataset.autoToday !== 'manual' && cutoffInput.value !== currentRealToday) {
+        cutoffInput.value = currentRealToday;
+        loadAllData();
+      }
+    }, 60 * 1000);
+
+    // Formulario "¿Cómo vas en tus turnos hoy?" para calcular desde el 1 de enero y proyectar días en adelante
+    const formHowGoing = document.getElementById('form-how-going');
+    if (formHowGoing) {
+      formHowGoing.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const refDate = document.getElementById('calc-ref-date').value.trim() || getLocalTodayISO();
+        const pattern = document.getElementById('calc-pattern').value;
+        const step = Number.parseInt(document.getElementById('calc-step').value || '0', 10);
+        const mode = document.getElementById('calc-mode').value;
+        const yearVal = refDate.slice(0, 4);
+
+        const startDate = mode === 'full_year' ? `${yearVal}-01-01` : refDate;
+        const days = 365;
+
+        try {
+          const res = await apiFetch('/api/turnos/patron', {
+            method: 'POST',
+            body: JSON.stringify({
+              startDate,
+              days,
+              pattern,
+              referenceDate: refDate,
+              stepOnReferenceDate: step,
+              postId: state.posts[0] ? state.posts[0].id : null,
+              overwriteExisting: true,
+              cutoffDate: getCutoffDateISO(),
+            }),
+          });
+          document.getElementById('filter-month').value = refDate.slice(0, 7);
+          await loadAllData();
+          announce(
+            `Turnos calculados con éxito (${res.count} días): del 1 de enero a hoy y proyección de los días en adelante actualizada.`,
+            'success'
+          );
+        } catch (err) {
+          announce(err.message, 'error');
+        }
+      });
+    }
+
+    // Botones de navegación del calendario mensual
+    const shiftMonthBy = (deltaMonths) => {
+      const monthInput = document.getElementById('filter-month');
+      const [y, m] = (monthInput.value || todayISO.slice(0, 7)).split('-').map(Number);
+      const dt = new Date(Date.UTC(y, m - 1 + deltaMonths, 1));
+      const ny = dt.getUTCFullYear();
+      const nm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+      monthInput.value = `${ny}-${nm}`;
+      loadAllData();
+    };
+
+    const btnPrev = document.getElementById('btn-cal-prev');
+    if (btnPrev) btnPrev.addEventListener('click', () => shiftMonthBy(-1));
+    const btnNext = document.getElementById('btn-cal-next');
+    if (btnNext) btnNext.addEventListener('click', () => shiftMonthBy(1));
+    const btnToday = document.getElementById('btn-cal-today');
+    if (btnToday) {
+      btnToday.addEventListener('click', () => {
+        const realToday = getLocalTodayISO();
+        if (cutoffInput) cutoffInput.value = realToday;
+        document.getElementById('filter-month').value = realToday.slice(0, 7);
+        loadAllData();
+      });
+    }
 
     window.addEventListener('online', () => {
       updateConnectionUI();
@@ -953,10 +1482,17 @@
       });
     }
 
-    // Cambio de mes en filtro de turnos
+    // Cambio de mes o periodo (Mes vs Año 365 días) en filtro de turnos
     document.getElementById('filter-month').addEventListener('change', () => {
+      state.customYearRange = null;
       loadAllData();
     });
+    const scopeSelect = document.getElementById('filter-scope');
+    if (scopeSelect) {
+      scopeSelect.addEventListener('change', () => {
+        loadAllData();
+      });
+    }
 
     // Cambio de fecha o tipo de turno actualiza horas sugeridas y aviso de festivo
     document.getElementById('shift-date').addEventListener('change', () => {
@@ -1062,12 +1598,57 @@
     document.getElementById('btn-close-pattern-modal').addEventListener('click', () => {
       closePatternModal();
     });
+    document.getElementById('pat-type').addEventListener('change', () => {
+      updatePatternOffsetOptions();
+    });
+
+    const btnPreset30 = document.getElementById('btn-preset-30');
+    if (btnPreset30) {
+      btnPreset30.addEventListener('click', () => {
+        const monthVal = document.getElementById('filter-month').value || '2026-11';
+        document.getElementById('pat-days').value = '30';
+        document.getElementById('pat-start-date').value = `${monthVal}-01`;
+      });
+    }
+    const btnPreset365 = document.getElementById('btn-preset-365');
+    if (btnPreset365) {
+      btnPreset365.addEventListener('click', () => {
+        const monthVal = document.getElementById('filter-month').value || '2026-11';
+        const yearVal = monthVal.split('-')[0] || '2026';
+        document.getElementById('pat-days').value = '365';
+        document.getElementById('pat-start-date').value = `${yearVal}-01-01`;
+      });
+    }
 
     document.getElementById('form-pattern-generator').addEventListener('submit', async (e) => {
       e.preventDefault();
+      const errBox = document.getElementById('pattern-modal-error');
+      if (errBox) {
+        errBox.textContent = '';
+        errBox.classList.add('hidden');
+      }
+
+      const startDateVal = document.getElementById('pat-start-date').value.trim();
+      const daysVal = Number.parseInt(document.getElementById('pat-days').value, 10);
+
+      if (!startDateVal) {
+        if (errBox) {
+          errBox.textContent = 'Seleccione la fecha de inicio del ciclo.';
+          errBox.classList.remove('hidden');
+        }
+        return;
+      }
+      if (!Number.isInteger(daysVal) || daysVal < 1 || daysVal > 730) {
+        if (errBox) {
+          errBox.textContent = 'Ingrese una cantidad de días entre 1 y 730 (por ejemplo, 30 para un mes o 365 para todo el año).';
+          errBox.classList.remove('hidden');
+        }
+        return;
+      }
+
       const payload = {
-        startDate: document.getElementById('pat-start-date').value,
-        days: Number(document.getElementById('pat-days').value || 18),
+        startDate: startDateVal,
+        days: daysVal,
         pattern: document.getElementById('pat-type').value,
         offsetDiaCiclo: Number(document.getElementById('pat-offset').value || 0),
         postId: document.getElementById('pat-post').value || null,
@@ -1080,10 +1661,33 @@
           method: 'POST',
           body: JSON.stringify(payload),
         });
+
+        const scopeEl = document.getElementById('filter-scope');
+        if (daysVal > 31 && res.shifts && res.shifts.length > 0) {
+          state.customYearRange = {
+            from: res.shifts[0].shiftDate,
+            to: res.shifts[res.shifts.length - 1].shiftDate,
+          };
+          if (scopeEl) scopeEl.value = 'year_365';
+        } else {
+          state.customYearRange = null;
+          if (scopeEl) scopeEl.value = 'month';
+          if (startDateVal.length >= 7) {
+            document.getElementById('filter-month').value = startDateVal.slice(0, 7);
+          }
+        }
+
         closePatternModal();
         await loadAllData();
-        announce(`Se generaron ${res.count} días de programación con el patrón ${payload.pattern}.`, 'success');
+        announce(
+          `Se generaron y contabilizaron ${res.count} días de programación con el patrón ${payload.pattern}.`,
+          'success'
+        );
       } catch (err) {
+        if (errBox) {
+          errBox.textContent = err.message;
+          errBox.classList.remove('hidden');
+        }
         announce(err.message, 'error');
       }
     });

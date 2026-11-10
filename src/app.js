@@ -230,6 +230,7 @@ function createApp(db, appConfig) {
           authModule.requireRole(currentUser, ['guarda', 'supervisor']);
           const fromDate = parsedUrl.searchParams.get('from') || undefined;
           const toDate = parsedUrl.searchParams.get('to') || undefined;
+          const cutoffDate = parsedUrl.searchParams.get('cutoff') || undefined;
           const shifts = turnosModule.listShifts({
             userId: currentUser.id,
             fromDate,
@@ -238,6 +239,7 @@ function createApp(db, appConfig) {
           const summary = turnosModule.getShiftsSummary(currentUser.id, {
             fromDate,
             toDate,
+            cutoffDate,
           });
           return sendJson(res, 200, { shifts, summary }, correlationId);
         }
@@ -251,6 +253,7 @@ function createApp(db, appConfig) {
           const summary = turnosModule.getShiftsSummary(currentUser.id, {
             fromDate: body.fromDate,
             toDate: body.toDate,
+            cutoffDate: body.cutoffDate,
           });
           return sendJson(res, 200, { shift, summary }, correlationId);
         }
@@ -261,7 +264,9 @@ function createApp(db, appConfig) {
           const shifts = turnosModule.applyPatternSchedule(currentUser.id, body, {
             actor: currentUser.username,
           });
-          const summary = turnosModule.getShiftsSummary(currentUser.id);
+          const summary = turnosModule.getShiftsSummary(currentUser.id, {
+            cutoffDate: body.cutoffDate,
+          });
           return sendJson(res, 200, { shifts, count: shifts.length, summary }, correlationId);
         }
 
@@ -377,11 +382,7 @@ function createApp(db, appConfig) {
       setSecurityHeaders(res, correlationId);
       res.statusCode = 200;
       res.setHeader('Content-Type', contentType);
-      if (ext === '.html' || relativeFile === 'sw.js') {
-        res.setHeader('Cache-Control', 'no-cache');
-      } else {
-        res.setHeader('Cache-Control', 'public, max-age=3600');
-      }
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
       res.end(fs.readFileSync(safeFilePath));
     } catch (err) {
       const isAppError = err instanceof AppError || Boolean(err.code && err.statusCode);
