@@ -7,7 +7,7 @@ const ROOT_DIR = path.resolve(__dirname, '..', '..');
 const config = {
   env: process.env.NODE_ENV || 'development',
   port: Number.parseInt(process.env.PORT || '3000', 10),
-  host: process.env.HOST || '127.0.0.1',
+  host: process.env.HOST || '0.0.0.0',
   rootDir: ROOT_DIR,
   dbPath: process.env.DB_PATH
     ? path.resolve(ROOT_DIR, process.env.DB_PATH)
