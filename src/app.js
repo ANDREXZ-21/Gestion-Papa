@@ -368,22 +368,42 @@ function createApp(db, appConfig) {
       }
 
       // =========================================================
-      // ARCHIVOS ESTÁTICOS FRONTEND (PWA)
+      // ARCHIVOS ESTÁTICOS FRONTEND (PWA / EMBEDDED SEA ASSETS)
       // =========================================================
       const relativeFile = pathname === '/' ? 'index.html' : pathname.slice(1);
       const safeFilePath = resolveSafePath(publicDir, relativeFile);
-
-      if (!fs.existsSync(safeFilePath) || fs.statSync(safeFilePath).isDirectory()) {
-        throw new AppError('STATIC_NOT_FOUND', 'El archivo solicitado no existe.', 404);
-      }
-
       const ext = path.extname(safeFilePath).toLowerCase();
       const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-      setSecurityHeaders(res, correlationId);
-      res.statusCode = 200;
-      res.setHeader('Content-Type', contentType);
-      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
-      res.end(fs.readFileSync(safeFilePath));
+
+      if (fs.existsSync(safeFilePath) && !fs.statSync(safeFilePath).isDirectory()) {
+        setSecurityHeaders(res, correlationId);
+        res.statusCode = 200;
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+        res.end(fs.readFileSync(safeFilePath));
+        return;
+      }
+
+      // Soporte 100% autocontenido para ejecutable portable (.exe Node SEA sin carpeta public/ externa)
+      try {
+        const sea = require('node:sea');
+        if (typeof sea.isSea === 'function' && sea.isSea()) {
+          const normalizedKey = `public/${relativeFile.replace(/\\/g, '/')}`;
+          const rawAsset = sea.getRawAsset(normalizedKey);
+          if (rawAsset) {
+            setSecurityHeaders(res, correlationId);
+            res.statusCode = 200;
+            res.setHeader('Content-Type', contentType);
+            res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+            res.end(Buffer.from(rawAsset));
+            return;
+          }
+        }
+      } catch {
+        // Continúa hacia 404 si el recurso no existe en los activos embebidos
+      }
+
+      throw new AppError('STATIC_NOT_FOUND', 'El archivo solicitado no existe.', 404);
     } catch (err) {
       const isAppError = err instanceof AppError || Boolean(err.code && err.statusCode);
       const statusCode = isAppError ? err.statusCode : 500;

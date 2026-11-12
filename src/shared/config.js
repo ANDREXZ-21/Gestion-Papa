@@ -2,12 +2,23 @@
 
 const path = require('node:path');
 
-const ROOT_DIR = path.resolve(__dirname, '..', '..');
+let isSeaApp = false;
+try {
+  const sea = require('node:sea');
+  isSeaApp = typeof sea.isSea === 'function' && sea.isSea();
+} catch {
+  isSeaApp = false;
+}
+
+const ROOT_DIR = isSeaApp
+  ? path.dirname(process.execPath)
+  : path.resolve(__dirname, '..', '..');
 
 const config = {
-  env: process.env.NODE_ENV || 'development',
+  env: process.env.NODE_ENV || (isSeaApp ? 'production' : 'development'),
   port: Number.parseInt(process.env.PORT || '3000', 10),
-  host: process.env.HOST || '0.0.0.0',
+  host: process.env.HOST || (isSeaApp ? '127.0.0.1' : '0.0.0.0'),
+  isPortableSea: isSeaApp,
   rootDir: ROOT_DIR,
   dbPath: process.env.DB_PATH
     ? path.resolve(ROOT_DIR, process.env.DB_PATH)

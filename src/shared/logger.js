@@ -48,7 +48,13 @@ function log(level, code, message, context = {}) {
   };
   if (process.env.NODE_ENV !== 'test') {
     const stream = level === 'ERROR' ? process.stderr : process.stdout;
-    stream.write(JSON.stringify(entry) + '\n');
+    if (stream && typeof stream.write === 'function') {
+      try {
+        stream.write(JSON.stringify(entry) + '\n');
+      } catch {
+        // Ignorar errores de escritura cuando se ejecuta como aplicación GUI sin consola en Windows
+      }
+    }
   }
   return entry;
 }

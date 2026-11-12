@@ -816,9 +816,9 @@
       li.style.alignItems = 'center';
       li.style.gap = '10px';
       li.style.padding = '12px';
-      li.style.background = '#f8fafc';
-      li.style.border = '1px solid #cbd5e1';
-      li.style.borderRadius = '8px';
+      li.style.background = 'var(--bg-subtle)';
+      li.style.border = '1px solid var(--border-color)';
+      li.style.borderRadius = '12px';
 
       const info = document.createElement('span');
       info.textContent = `${b.filename} (${Math.round(b.sizeBytes / 1024)} KB · ${b.updatedAt.slice(0, 19).replace('T', ' ')})`;
@@ -860,7 +860,7 @@
       strong.textContent = t.subject;
       const p = document.createElement('div');
       p.style.fontSize = '0.85rem';
-      p.style.color = '#334155';
+      p.style.color = 'var(--text-secondary)';
       p.textContent = t.description;
       tdSub.appendChild(strong);
       tdSub.appendChild(p);
