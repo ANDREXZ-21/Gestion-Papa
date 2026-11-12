@@ -1,10 +1,12 @@
 'use strict';
 
-const CACHE_VERSION = 'gestion-papa-v1.4.0';
+const CACHE_VERSION = 'gestion-papa-v1.5.0';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
+  '/astrix-theme.css',
   '/styles.css',
+  '/astrix-panel.js',
   '/app.js',
   '/manifest.webmanifest',
   '/icon.svg',
